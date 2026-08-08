@@ -7,7 +7,6 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use conveyor_balancer::{ConveyorSensor, ConveyorSensorArray};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker, Timer};
 use esp_backtrace as _;
@@ -15,7 +14,8 @@ use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{InputConfig, Pull};
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
-use log::info;
+use log::{error, info};
+use conveyor_balancer::sensor::{score, ConveyorSensor, ConveyorSensorArray, ArraySide};
 
 extern crate alloc;
 
@@ -81,14 +81,13 @@ async fn main(spawner: Spawner) -> ! {
         input_config.clone(),
     ));
     // initialise N conveyor sensors
-    let sensor_array = ConveyorSensorArray::new([conveyor_sensor_1,conveyor_sensor_2,conveyor_sensor_3,conveyor_sensor_4],true);
+    let sensor_array = ConveyorSensorArray::new([conveyor_sensor_1,conveyor_sensor_2,conveyor_sensor_3,conveyor_sensor_4],ArraySide::Left);
 
 
     let spawner = spawner;
     spawner.spawn(measure_array(sensor_array).unwrap());
     // run stepper
     loop {
-        info!("Hello world!");
         Timer::after(Duration::from_secs(1)).await;
     }
 
@@ -102,10 +101,18 @@ async fn measure_array(mut conveyor_sensor_array: ConveyorSensorArray<esp_hal::g
 {
     // todo: transmit score to another thread
     println!("Starting array measurement loop");
-    let mut ticker = Ticker::every(Duration::from_secs(5));
+    let mut ticker = Ticker::every(Duration::from_secs(1));
     loop{
-        let score = conveyor_sensor_array.detection_score();
-        println!("Score: {}", score);
+        match conveyor_sensor_array.sample(){
+            Ok(x) => {
+                let score = score(&x,conveyor_sensor_array.array_side());
+                // todo: add noise suppression, filter score and software-debounce inputs
+                println!("Detections: {:?}, Score: {}",x, score);
+            }
+            Err(x) => {
+                error!("{}", x);
+            }
+        }
         ticker.next().await;
     }
 }
