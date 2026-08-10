@@ -7,15 +7,16 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+use conveyor_balancer::sensor::{ArraySide, ConveyorSensor, ConveyorSensorArray, score};
+use conveyor_balancer::stepper_motor::{Direction, StepperMotor, StepsPerRevolution};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{InputConfig, Pull};
+use esp_hal::gpio::{DriveMode, InputConfig, Level, Pull};
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 use log::{error, info};
-use conveyor_balancer::sensor::{score, ConveyorSensor, ConveyorSensorArray, ArraySide};
 
 extern crate alloc;
 
@@ -81,11 +82,38 @@ async fn main(spawner: Spawner) -> ! {
         input_config.clone(),
     ));
     // initialise N conveyor sensors
-    let sensor_array = ConveyorSensorArray::new([conveyor_sensor_1,conveyor_sensor_2,conveyor_sensor_3,conveyor_sensor_4],ArraySide::Left);
+    let sensor_array = ConveyorSensorArray::new(
+        [
+            conveyor_sensor_1,
+            conveyor_sensor_2,
+            conveyor_sensor_3,
+            conveyor_sensor_4,
+        ],
+        ArraySide::Left,
+    );
 
+    let output_config = esp_hal::gpio::OutputConfig::default().with_drive_mode(DriveMode::PushPull);
+    let pulse_pin =
+        esp_hal::gpio::Output::new(peripherals.GPIO13, Level::Low, output_config.clone());
+    let direction_pin =
+        esp_hal::gpio::Output::new(peripherals.GPIO14, Level::Low, output_config.clone());
+    let enable_pin =
+        esp_hal::gpio::Output::new(peripherals.GPIO12, Level::Low, output_config.clone());
+    let stepper_driver = StepperMotor::<esp_hal::gpio::Output<'static>, esp_hal::delay::Delay>::new(
+        pulse_pin,
+        direction_pin,
+        enable_pin,
+        esp_hal::delay::Delay::new(),
+        StepsPerRevolution::Steps800,
+    );
+
+
+    // board has onboard led, will blink every time we step
+    let d2_led = esp_hal::gpio::Output::new(peripherals.GPIO2, Level::Low, output_config.clone());
 
     let spawner = spawner;
     spawner.spawn(measure_array(sensor_array).unwrap());
+    spawner.spawn(run_stepper(stepper_driver,d2_led).unwrap());
     // run stepper
     loop {
         Timer::after(Duration::from_secs(1)).await;
@@ -94,20 +122,19 @@ async fn main(spawner: Spawner) -> ! {
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.1.0/examples
 }
 
-
-
 #[embassy_executor::task]
-async fn measure_array(mut conveyor_sensor_array: ConveyorSensorArray<esp_hal::gpio::Input<'static>,4>)
-{
+async fn measure_array(
+    mut conveyor_sensor_array: ConveyorSensorArray<esp_hal::gpio::Input<'static>, 4>,
+) {
     // todo: transmit score to another thread
     println!("Starting array measurement loop");
-    let mut ticker = Ticker::every(Duration::from_secs(1));
-    loop{
-        match conveyor_sensor_array.sample(){
+    let mut ticker = Ticker::every(Duration::from_millis(100));
+    loop {
+        match conveyor_sensor_array.sample() {
             Ok(x) => {
-                let score = score(&x,conveyor_sensor_array.array_side());
+                let score = score(&x, conveyor_sensor_array.array_side());
                 // todo: add noise suppression, filter score and software-debounce inputs
-                println!("Detections: {:?}, Score: {}",x, score);
+                println!("Detections: {:?}, Score: {}", x, score);
             }
             Err(x) => {
                 error!("{}", x);
@@ -117,3 +144,36 @@ async fn measure_array(mut conveyor_sensor_array: ConveyorSensorArray<esp_hal::g
     }
 }
 
+#[embassy_executor::task]
+async fn run_stepper(
+    mut stepper_driver: StepperMotor<esp_hal::gpio::Output<'static>, esp_hal::delay::Delay>,
+    mut d2_led: esp_hal::gpio::Output<'static>,
+) {
+    // todo: transmit score to another thread
+    println!("Starting stepper control loop");
+
+    println!("Arming Motor...");
+    stepper_driver.enable_driver().unwrap();
+    println!("Motor Armed");
+
+
+    println!("Direction set Clockwise...");
+    stepper_driver.set_direction(Direction::Clockwise).unwrap();
+
+    const MAX_STEPS: u16= 16;
+
+    println!("Step {MAX_STEPS} times");
+
+    let mut steps = 0;
+    let mut ticker = Ticker::every(Duration::from_millis(100));
+    loop {
+        if steps> MAX_STEPS{
+            break;
+        }
+        d2_led.set_high();
+        stepper_driver.step().unwrap();
+        d2_led.set_low();
+        steps+=1;
+        ticker.next().await;
+    }
+}

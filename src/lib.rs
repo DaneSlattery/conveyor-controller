@@ -14,9 +14,8 @@
 //! As the conveyor shifts alignment, the inputs will become more negative or more positive.
 
 pub mod sensor;
-pub mod shaft_position{}
+pub mod shaft_position {}
 
-pub mod controller{}
+pub mod controller {}
 
-pub mod stepper_motor{}
-
+pub mod stepper_motor;

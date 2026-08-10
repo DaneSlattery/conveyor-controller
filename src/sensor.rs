@@ -1,7 +1,3 @@
-
-
-
-
 /// Represents a single conveyor belt sensor
 pub struct ConveyorSensor<P> {
     pin: P,
@@ -19,7 +15,7 @@ where
         }
     }
 
-    pub fn triggered(&mut self) -> Result<bool,P::Error> {
+    pub fn triggered(&mut self) -> Result<bool, P::Error> {
         if self.active_low {
             return self.pin.is_low();
         }
@@ -27,11 +23,9 @@ where
     }
 }
 
-
-pub enum ArraySide
-{
+pub enum ArraySide {
     Left,
-    Right
+    Right,
 }
 
 pub struct ConveyorSensorArray<P, const N: usize> {
@@ -51,12 +45,12 @@ pub struct ConveyorSensorArray<P, const N: usize> {
 // and higher ranked sensors indicate rightwards movement
 // todo: consider cases where the detection is clearly swapped, eg if the sensor array is
 // on the left, and we see [true,false,false,false], then something is wrong!
-pub fn score<const N:usize>( detections: &[bool;N],array_side: &ArraySide ) -> i16 {
-    let active =  detections.iter().filter(|&&d|d).count() as i16;
-    let raw = active-((N/2) as i16);
+pub fn score<const N: usize>(detections: &[bool; N], array_side: &ArraySide) -> i16 {
+    let active = detections.iter().filter(|&&d| d).count() as i16;
+    let raw = active - ((N / 2) as i16);
     match array_side {
-        ArraySide::Right => {raw}
-        ArraySide::Left => {-raw}
+        ArraySide::Right => raw,
+        ArraySide::Left => -raw,
     }
 }
 
@@ -75,25 +69,15 @@ where
         &self.array_side
     }
 
-    pub fn sample(&mut self)-> Result<[bool;N],P::Error>
-    {
-        let mut detections: [bool;N] = [false;N];
+    pub fn sample(&mut self) -> Result<[bool; N], P::Error> {
+        let mut detections: [bool; N] = [false; N];
 
-        for (d, mut s) in detections.iter_mut().zip(&mut self.sensors)
-        {
+        for (d, mut s) in detections.iter_mut().zip(&mut self.sensors) {
             *d = s.triggered()?;
         }
         Ok(detections)
     }
-    
 }
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -102,37 +86,40 @@ mod tests {
 
     use embedded_hal_mock::eh1::digital::{Mock as PinMock, Mock};
 
-
     #[test]
     fn scores_sensor_patterns() {
         let cases = [
-            ([false, false, false, false], ArraySide::Left,  2),
-            ([false, false, false, true ], ArraySide::Left,  1),
-            ([false, false, true,  true ], ArraySide::Left,  0),
-            ([false, true,  true,  true ], ArraySide::Left, -1),
-            ([true,  true,  true,  true ], ArraySide::Left, -2),
-
+            ([false, false, false, false], ArraySide::Left, 2),
+            ([false, false, false, true], ArraySide::Left, 1),
+            ([false, false, true, true], ArraySide::Left, 0),
+            ([false, true, true, true], ArraySide::Left, -1),
+            ([true, true, true, true], ArraySide::Left, -2),
             ([false, false, false, false], ArraySide::Right, -2),
-            ([true,  false, false, false], ArraySide::Right, -1),
-            ([true,  true,  false, false], ArraySide::Right,  0),
-            ([true,  true,  true,  false], ArraySide::Right,  1),
-            ([true,  true,  true,  true ], ArraySide::Right,  2),
+            ([true, false, false, false], ArraySide::Right, -1),
+            ([true, true, false, false], ArraySide::Right, 0),
+            ([true, true, true, false], ArraySide::Right, 1),
+            ([true, true, true, true], ArraySide::Right, 2),
         ];
 
         for (detections, side, expected) in cases {
-
             assert_eq!(score(&detections, &side), expected);
         }
     }
 
-    fn create_conveyor_sensor_array(pin1: &Mock,pin2:&Mock,pin3:&Mock,pin4:&Mock, left: bool) -> ConveyorSensorArray<Mock,4>
-    {
+    fn create_conveyor_sensor_array(
+        pin1: &Mock,
+        pin2: &Mock,
+        pin3: &Mock,
+        pin4: &Mock,
+        left: bool,
+    ) -> ConveyorSensorArray<Mock, 4> {
         let sensor1 = ConveyorSensor::new(pin1.clone());
         let sensor2 = ConveyorSensor::new(pin2.clone());
         let sensor3 = ConveyorSensor::new(pin3.clone());
         let sensor4 = ConveyorSensor::new(pin4.clone());
 
-        let mut sensors = ConveyorSensorArray::new([sensor1, sensor2, sensor3, sensor4],ArraySide::Left);
+        let mut sensors =
+            ConveyorSensorArray::new([sensor1, sensor2, sensor3, sensor4], ArraySide::Left);
         return sensors;
     }
 
