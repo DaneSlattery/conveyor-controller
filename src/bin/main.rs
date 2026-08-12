@@ -108,12 +108,12 @@ async fn main(spawner: Spawner) -> ! {
     );
 
 
-    // board has onboard led, will blink every time we step
+    // board has onboard led, will blink for some diagnostics
     let d2_led = esp_hal::gpio::Output::new(peripherals.GPIO2, Level::Low, output_config.clone());
 
     let spawner = spawner;
-    spawner.spawn(measure_array(sensor_array).unwrap());
-    spawner.spawn(run_stepper(stepper_driver,d2_led).unwrap());
+    spawner.spawn(measure_array(sensor_array,d2_led).unwrap());
+    spawner.spawn(run_stepper(stepper_driver).unwrap());
     // run stepper
     loop {
         Timer::after(Duration::from_secs(1)).await;
@@ -125,11 +125,14 @@ async fn main(spawner: Spawner) -> ! {
 #[embassy_executor::task]
 async fn measure_array(
     mut conveyor_sensor_array: ConveyorSensorArray<esp_hal::gpio::Input<'static>, 4>,
+    mut d2_led: esp_hal::gpio::Output<'static>,
+
 ) {
     // todo: transmit score to another thread
     println!("Starting array measurement loop");
     let mut ticker = Ticker::every(Duration::from_millis(100));
     loop {
+        d2_led.set_high();
         match conveyor_sensor_array.sample() {
             Ok(x) => {
                 let score = score(&x, conveyor_sensor_array.array_side());
@@ -140,6 +143,8 @@ async fn measure_array(
                 error!("{}", x);
             }
         }
+        d2_led.set_low();
+
         ticker.next().await;
     }
 }
@@ -147,7 +152,6 @@ async fn measure_array(
 #[embassy_executor::task]
 async fn run_stepper(
     mut stepper_driver: StepperMotor<esp_hal::gpio::Output<'static>, esp_hal::delay::Delay>,
-    mut d2_led: esp_hal::gpio::Output<'static>,
 ) {
     // todo: transmit score to another thread
     println!("Starting stepper control loop");
@@ -170,9 +174,8 @@ async fn run_stepper(
         if steps> MAX_STEPS{
             break;
         }
-        d2_led.set_high();
+
         stepper_driver.step().unwrap();
-        d2_led.set_low();
         steps+=1;
         ticker.next().await;
     }
