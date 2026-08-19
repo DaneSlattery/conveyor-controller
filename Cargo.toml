@@ -11,9 +11,22 @@ required-features = ["firmware"]
 test = false
 bench = false
 
+
+[[bin]]
+name="simulator"
+path = "src/bin/simulator.rs"
+required-features = ["simulator"]
+
 [features]
 default = []
 firmware = []
+simulator = ["dep:blinksy-desktop","blinksy/async","blinksy-desktop/async",
+"embassy-sync/std","critical-section/std","embassy-time/log"]
+
+[target.'cfg(not(target_os="none"))'.dependencies]
+embassy-time = { version = "0.5.1" ,features = ["std"]}
+blinksy-desktop = {version = "0.11.0",optional = true}
+embassy-executor = { version = "0.10.0",features = ["platform-std","log","executor-thread"] }
 
 [target.xtensa-esp32-none-elf.dependencies]
 esp-hal = { version = "~1.1.0", features = ["esp32", "log-04", "unstable"]}
@@ -29,8 +42,6 @@ esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32", "log-04"] }
 log = "0.4.27"
 
 embassy-executor = { version = "0.10.0", features = ["log"]}
-embassy-time = { version = "0.5.0", features = ["log"]}
-
 esp-alloc = { version = "0.10.0"}
 esp-backtrace = { version = "0.19.0", features = [
     "esp32",
@@ -39,16 +50,22 @@ esp-backtrace = { version = "0.19.0", features = [
 ]}
 esp-println = { version = "0.17.0", features = ["esp32", "log-04"] }
 
-critical-section = { version = "1.2.0" }
 static_cell = { version = "2.1.1" }
 
 
 
 [dependencies]
-embassy-sync = { version = "*" }
+critical-section = { version = "1.2.0" }
+embassy-sync = { version = "0.8.0",features = ["log"] }
+embassy-time = { version = "0.5.0", features = ["log"]}
 embedded-hal-async = "1.0.0"
 embedded-hal = { version = "1.0.0" }
-heapless = "0.9.3"
+circular-buffer = {version = "2",default-features = false}
+moving_median = "0.4"
+rand = "0.10.2"
+blinksy = {version = "0.11.0",default-features = false}
+
+
 
 
 
@@ -68,3 +85,6 @@ lto = 'fat'
 opt-level = 's'
 
 
+[patch.crates-io]
+blinksy-desktop={git="https://github.com/ahdinosaur/blinksy"}
+blinksy={git="https://github.com/ahdinosaur/blinksy"}

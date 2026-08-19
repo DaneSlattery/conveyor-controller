@@ -1,3 +1,15 @@
+//! Represents the belt displacement measurement
+//!
+//! We have an array of laser sensors detecting sideways motion of the conveyor belt
+//!
+//! We can filter the sensor measurements in a few ways:
+//!
+//! A software debounce per sensor, using a median filter
+//! or maximum rate of change filter
+
+use circular_buffer::{FixedCircularBuffer, Iter};
+
+
 /// Represents a single conveyor belt sensor
 pub struct ConveyorSensor<P> {
     pin: P,
@@ -45,13 +57,50 @@ pub struct ConveyorSensorArray<P, const N: usize> {
 // and higher ranked sensors indicate rightwards movement
 // todo: consider cases where the detection is clearly swapped, eg if the sensor array is
 // on the left, and we see [true,false,false,false], then something is wrong!
-pub fn score<const N: usize>(detections: &[bool; N], array_side: &ArraySide) -> i16 {
+pub fn score<const N: usize>(detections: &Detection<N>, array_side: &ArraySide) -> i16 {
     let active = detections.iter().filter(|&&d| d).count() as i16;
     let raw = active - ((N / 2) as i16);
     match array_side {
         ArraySide::Right => raw,
         ArraySide::Left => -raw,
     }
+}
+
+pub type Detection<const NUM_SENSOR:usize> = [bool; NUM_SENSOR];
+
+pub struct DetectionHistory<const NUM_SENSOR: usize,const NUM_HISTORY: usize>
+{
+    detections: FixedCircularBuffer<Detection<NUM_SENSOR>,NUM_HISTORY>,
+}
+
+impl<const NUM_SENSOR:usize,const NUM_HISTORY:usize> DetectionHistory<NUM_SENSOR,NUM_HISTORY>
+{
+    pub fn new() -> Self {
+        Self{
+            detections: FixedCircularBuffer::default()
+        }
+    }
+
+    pub fn push_detection(&mut self, detection: Detection<NUM_SENSOR>) {
+        self.detections.push_back(detection);
+    }
+
+
+    pub fn num_detections(&self) -> usize {
+        self.detections.len()
+    }
+
+    pub fn get_detections(&self) -> Iter<Detection<NUM_SENSOR>>
+    {
+        self.detections.iter()
+    }
+}
+
+
+pub fn median_filter(score: i16,moving_median: &mut moving_median::MovingMedian<i16,5>)-> Option<i16>
+{
+    moving_median.add_value(score).expect("Value for moving median cannot be NaN");
+    moving_median.median()
 }
 
 impl<P, const N: usize> ConveyorSensorArray<P, N>
@@ -69,7 +118,7 @@ where
         &self.array_side
     }
 
-    pub fn sample(&mut self) -> Result<[bool; N], P::Error> {
+    pub fn sample(&mut self) -> Result<Detection<N>, P::Error> {
         let mut detections: [bool; N] = [false; N];
 
         for (d, mut s) in detections.iter_mut().zip(&mut self.sensors) {

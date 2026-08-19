@@ -29,7 +29,7 @@ pub struct DipSwitches {
 
 impl DipSwitches {
     pub const fn stand_still_current(dip_switches: DipSwitches) -> StandStillCurrent {
-        match (dip_switches.switch4) {
+        match dip_switches.switch4 {
             // ON => standstill current = same as selected current
             true => StandStillCurrent::Full,
             // OFF => standstill current = half of selected current

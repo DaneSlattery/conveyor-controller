@@ -7,7 +7,7 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use conveyor_balancer::sensor::{ArraySide, ConveyorSensor, ConveyorSensorArray, score};
+use conveyor_balancer::sensor::{median_filter, score, ArraySide, ConveyorSensor, ConveyorSensorArray, DetectionHistory};
 use conveyor_balancer::stepper_motor::{Direction, StepperMotor, StepsPerRevolution};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker, Timer};
@@ -23,6 +23,7 @@ use esp_hal::timer::timg::TimerGroup;
 use esp_hal::xtensa_lx::timer::delay;
 use esp_println::println;
 use log::{error, info};
+use moving_median::MovingMedian;
 
 extern crate alloc;
 
@@ -151,13 +152,23 @@ async fn measure_array(
 ) {
     // todo: transmit score to another thread
     println!("Starting array measurement loop");
-    let mut ticker = Ticker::every(Duration::from_micros(500));
+
+    let mut detection_history = DetectionHistory::new();
+
+    let mut moving_median = MovingMedian::new();
+    let mut ticker = Ticker::every(Duration::from_millis(1000));
     loop {
         d2_led.set_high();
         match conveyor_sensor_array.sample() {
             Ok(x) => {
+                detection_history.push_detection(x);
                 let score = score(&x, conveyor_sensor_array.array_side());
+
+                let filtered_score = median_filter(score,&mut moving_median);
+
+
                 // todo: add noise suppression, filter score and software-debounce inputs
+                println!("Detections: {:?}, Raw Score: {}, filtered score: {}", x, score,filtered_score);
                 // println!("Detections: {:?}, Score: {}", x, score);
 
                 signal.signal(score);
