@@ -7,7 +7,12 @@
 //! A software debounce per sensor, using a median filter
 //! or maximum rate of change filter
 
+use alloc::vec::Vec;
+// use alloc::vec::Vec;
 use circular_buffer::{FixedCircularBuffer, Iter};
+
+
+
 
 
 /// Represents a single conveyor belt sensor
@@ -68,6 +73,7 @@ pub fn score<const N: usize>(detections: &Detection<N>, array_side: &ArraySide) 
 
 pub type Detection<const NUM_SENSOR:usize> = [bool; NUM_SENSOR];
 
+#[derive(Default, Clone,Debug)]
 pub struct DetectionHistory<const NUM_SENSOR: usize,const NUM_HISTORY: usize>
 {
     detections: FixedCircularBuffer<Detection<NUM_SENSOR>,NUM_HISTORY>,
@@ -76,18 +82,33 @@ pub struct DetectionHistory<const NUM_SENSOR: usize,const NUM_HISTORY: usize>
 impl<const NUM_SENSOR:usize,const NUM_HISTORY:usize> DetectionHistory<NUM_SENSOR,NUM_HISTORY>
 {
     pub fn new() -> Self {
-        Self{
+        let mut this = Self{
             detections: FixedCircularBuffer::default()
-        }
+        };
+        this.detections.fill([false;NUM_SENSOR]);
+        this
     }
 
     pub fn push_detection(&mut self, detection: Detection<NUM_SENSOR>) {
         self.detections.push_back(detection);
     }
 
+    pub  fn get_num_sensors(&self) -> usize {
+        NUM_SENSOR
+    }
+    pub  fn get_history_capacity(&self) -> usize {
+        NUM_HISTORY
+    }
 
     pub fn num_detections(&self) -> usize {
         self.detections.len()
+    }
+
+    pub fn detection_array(&self)-> [Detection<NUM_SENSOR>;NUM_HISTORY]
+    {
+        self.detections.iter().copied().collect::<Vec<Detection<NUM_SENSOR>>>().try_into().unwrap()
+        // self.detections.iter().map(|detection| *detection).collect::<Vec::<Detection<NUM_SENSOR>>>().try_into()
+        //     .expect("Cannot convert to fixed size array")
     }
 
     pub fn get_detections(&self) -> Iter<Detection<NUM_SENSOR>>
@@ -112,6 +133,9 @@ where
             sensors,
             array_side,
         }
+    }
+    pub  fn get_num_sensors(&self) -> usize {
+        N
     }
 
     pub fn array_side(&self) -> &ArraySide {
