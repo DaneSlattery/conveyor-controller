@@ -30,6 +30,7 @@ log = "0.4.27"
 
 embassy-executor = { version = "0.10.0", features = ["log"]}
 embassy-time = { version = "0.5.0", features = ["log"]}
+
 esp-alloc = { version = "0.10.0"}
 esp-backtrace = { version = "0.19.0", features = [
     "esp32",
@@ -41,8 +42,11 @@ esp-println = { version = "0.17.0", features = ["esp32", "log-04"] }
 critical-section = { version = "1.2.0" }
 static_cell = { version = "2.1.1" }
 
-[dependencies]
 
+
+[dependencies]
+embassy-sync = { version = "*" }
+embedded-hal-async = "1.0.0"
 embedded-hal = { version = "1.0.0" }
 heapless = "0.9.3"
 

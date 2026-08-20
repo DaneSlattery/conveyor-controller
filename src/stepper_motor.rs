@@ -209,13 +209,13 @@ where
         // so this might be inverted.
         // when the pin is HIGH, driver enabled,
         // when the pin is LOW, driver disabled
-        self.enable_pin.set_low()?;
+        self.enable_pin.set_high()?;
         self._enabled = true;
         Ok(())
     }
 
     pub fn disable_driver(&mut self) -> Result<(), P::Error> {
-        self.enable_pin.set_high()?;
+        self.enable_pin.set_low()?;
         self._enabled = false;
         Ok(())
     }
@@ -256,16 +256,16 @@ where
         if !self.is_enabled() {
             return Ok(());
         }
-
+        const STEP_DELAY_US: u32 = 20;
         // todo: should we count steps/ direction?
         // this hardware has a potentiometer embedded for position feedback,
         // so this driver could take in a position encoder as a module, or the
         // controller can be responsible for position feedback with background threads
         // running stepper motor control, adc readings, pid, etc
         self.pulse_pin.set_high().unwrap();
-        self.delay.delay_ms(1); // todo: this could be adjusted based on the steps per revolution to get an accurate "rpm"
+        self.delay.delay_us(STEP_DELAY_US); // todo: this could be adjusted based on the steps per revolution to get an accurate "rpm"
         self.pulse_pin.set_low().unwrap();
-        self.delay.delay_ms(1);
+        self.delay.delay_us(STEP_DELAY_US);
         Ok(())
     }
 }

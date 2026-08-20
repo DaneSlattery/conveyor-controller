@@ -104,8 +104,10 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "embassy-executor",
+ "embassy-sync 0.6.2",
  "embassy-time",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "embedded-hal-mock",
  "esp-alloc",
  "esp-backtrace",

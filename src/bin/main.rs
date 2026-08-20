@@ -11,10 +11,16 @@ use conveyor_balancer::sensor::{ArraySide, ConveyorSensor, ConveyorSensorArray, 
 use conveyor_balancer::stepper_motor::{Direction, StepperMotor, StepsPerRevolution};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker, Timer};
+// use embedded_hal::delay::DelayNs;
+
+use embedded_hal_async::delay::DelayNs;
+
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{DriveMode, InputConfig, Level, Pull};
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::xtensa_lx::timer::delay;
 use esp_println::println;
 use log::{error, info};
 
@@ -23,6 +29,11 @@ extern crate alloc;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
+
+
+use embassy_sync::signal;
+use embassy_sync::signal::Signal;
+use embassy_sync::watch::Watch;
 
 #[allow(
     clippy::large_stack_frames,
@@ -92,13 +103,16 @@ async fn main(spawner: Spawner) -> ! {
         ArraySide::Left,
     );
 
+
+
+
     let output_config = esp_hal::gpio::OutputConfig::default().with_drive_mode(DriveMode::PushPull);
     let pulse_pin =
-        esp_hal::gpio::Output::new(peripherals.GPIO13, Level::Low, output_config.clone());
-    let direction_pin =
         esp_hal::gpio::Output::new(peripherals.GPIO14, Level::Low, output_config.clone());
+    let direction_pin =
+        esp_hal::gpio::Output::new(peripherals.GPIO27, Level::Low, output_config.clone());
     let enable_pin =
-        esp_hal::gpio::Output::new(peripherals.GPIO12, Level::Low, output_config.clone());
+        esp_hal::gpio::Output::new(peripherals.GPIO13, Level::Low, output_config.clone());
     let stepper_driver = StepperMotor::<esp_hal::gpio::Output<'static>, esp_hal::delay::Delay>::new(
         pulse_pin,
         direction_pin,
@@ -108,12 +122,18 @@ async fn main(spawner: Spawner) -> ! {
     );
 
 
+    static score_signal : Signal<CriticalSectionRawMutex, i16 >= Signal::new();
+// static score_watch: Watch<CriticalSectionRawMutex> = Watch::new();
+
+
+
+
     // board has onboard led, will blink for some diagnostics
     let d2_led = esp_hal::gpio::Output::new(peripherals.GPIO2, Level::Low, output_config.clone());
 
     let spawner = spawner;
-    spawner.spawn(measure_array(sensor_array,d2_led).unwrap());
-    spawner.spawn(run_stepper(stepper_driver).unwrap());
+    spawner.spawn(measure_array(sensor_array,d2_led,&score_signal).unwrap());
+    spawner.spawn(run_stepper(stepper_driver,&score_signal).unwrap());
     // run stepper
     loop {
         Timer::after(Duration::from_secs(1)).await;
@@ -126,18 +146,21 @@ async fn main(spawner: Spawner) -> ! {
 async fn measure_array(
     mut conveyor_sensor_array: ConveyorSensorArray<esp_hal::gpio::Input<'static>, 4>,
     mut d2_led: esp_hal::gpio::Output<'static>,
+    signal:&'static Signal<CriticalSectionRawMutex,i16>
 
 ) {
     // todo: transmit score to another thread
     println!("Starting array measurement loop");
-    let mut ticker = Ticker::every(Duration::from_millis(100));
+    let mut ticker = Ticker::every(Duration::from_micros(500));
     loop {
         d2_led.set_high();
         match conveyor_sensor_array.sample() {
             Ok(x) => {
                 let score = score(&x, conveyor_sensor_array.array_side());
                 // todo: add noise suppression, filter score and software-debounce inputs
-                println!("Detections: {:?}, Score: {}", x, score);
+                // println!("Detections: {:?}, Score: {}", x, score);
+
+                signal.signal(score);
             }
             Err(x) => {
                 error!("{}", x);
@@ -152,6 +175,7 @@ async fn measure_array(
 #[embassy_executor::task]
 async fn run_stepper(
     mut stepper_driver: StepperMotor<esp_hal::gpio::Output<'static>, esp_hal::delay::Delay>,
+    signal:&'static Signal<CriticalSectionRawMutex,i16>
 ) {
     // todo: transmit score to another thread
     println!("Starting stepper control loop");
@@ -162,14 +186,45 @@ async fn run_stepper(
 
 
     println!("Direction set Clockwise...");
-    stepper_driver.set_direction(Direction::Clockwise).unwrap();
+    stepper_driver.set_direction(Direction::CounterClockwise).unwrap();
+    let mut delay = embassy_time::Delay;
+    delay.delay_ms(1000).await;
 
-    const MAX_STEPS: u16= 16;
+
+    loop {
+        if let Some(score) = signal.try_take()
+        {
+            if (score > 0)
+            {
+                println!("CCL");
+
+                stepper_driver.enable_driver().unwrap();
+                stepper_driver.set_direction(Direction::CounterClockwise).unwrap();
+                stepper_driver.step().unwrap();
+            }
+            else if (score<0) {
+                println!("CL");
+
+                stepper_driver.enable_driver().unwrap();
+                stepper_driver.set_direction(Direction::Clockwise).unwrap();
+                stepper_driver.step().unwrap();
+            }
+            else{
+                println!("Disarming Motor...");
+
+                stepper_driver.disable_driver().unwrap();
+            }
+        }
+        delay.delay_us(500).await;
+    }
+
+
+    const MAX_STEPS: u16= 3200;
 
     println!("Step {MAX_STEPS} times");
 
     let mut steps = 0;
-    let mut ticker = Ticker::every(Duration::from_millis(100));
+    // let mut ticker = Ticker::every(Duration::from_millis(100));
     loop {
         if steps> MAX_STEPS{
             break;
@@ -177,6 +232,27 @@ async fn run_stepper(
 
         stepper_driver.step().unwrap();
         steps+=1;
-        ticker.next().await;
+        // ticker.next().await;
+        delay.delay_ms(1).await;
+        // yield_now().await;
     }
+
+    stepper_driver.swap_direction().unwrap();
+
+    println!("Direction set CounterClockwise...");
+    let mut steps = 0;
+    // let mut ticker = Ticker::every(Duration::from_millis(100));
+    loop {
+        if steps> MAX_STEPS{
+            break;
+        }
+
+        stepper_driver.step().unwrap();
+        steps+=1;
+        // ticker.next().await;
+        delay.delay_ms(1).await;
+        // yield_now().await;
+    }
+    println!("Disarming Motor...");
+    stepper_driver.disable_driver().unwrap();
 }
