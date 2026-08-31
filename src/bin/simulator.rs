@@ -1,9 +1,6 @@
 use blinksy::layout::{Layout2d, Shape2d, Vec2};
-use blinksy::{
-    ControlBuilder, layout2d,
-    pattern::Pattern,
-};
 use blinksy::patterns::noise::NoiseParams;
+use blinksy::{ControlBuilder, layout2d, pattern::Pattern};
 use blinksy_desktop::{
     button::DesktopButton,
     driver::KeyCode,
@@ -12,14 +9,12 @@ use blinksy_desktop::{
 };
 use conveyor_balancer::display::{DetectionGrid, GridParams};
 use conveyor_balancer::sensor::{Detection, DetectionHistory};
-use conveyor_balancer::{SENSOR_COUNT, HISTORY_DEPTH};
+use conveyor_balancer::{HISTORY_DEPTH, SENSOR_COUNT};
 use embassy_executor::{Executor, Spawner};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use static_cell::StaticCell;
-
-
 
 layout2d!(
     PanelLayout,
@@ -33,9 +28,10 @@ layout2d!(
     }]
 );
 
-
 #[embassy_executor::task]
-async fn draw_task(sign: &'static Signal<CriticalSectionRawMutex, [Detection<SENSOR_COUNT>; HISTORY_DEPTH]>) -> ! {
+async fn draw_task(
+    sign: &'static Signal<CriticalSectionRawMutex, [Detection<SENSOR_COUNT>; HISTORY_DEPTH]>,
+) -> ! {
     // Press the space bar to change the color of the strip.
     // This example only cares about single clicks, so we set the release and hold times really short.
     let mut button = DesktopButton::new_embassy(
@@ -96,18 +92,20 @@ async fn draw_task(sign: &'static Signal<CriticalSectionRawMutex, [Detection<SEN
     // }
 }
 
-
-
 #[embassy_executor::task]
 async fn main_task(spawner: Spawner) {
-    static TRIGGER: Signal<CriticalSectionRawMutex, [Detection<SENSOR_COUNT>; HISTORY_DEPTH]> = Signal::new();
+    static TRIGGER: Signal<CriticalSectionRawMutex, [Detection<SENSOR_COUNT>; HISTORY_DEPTH]> =
+        Signal::new();
     spawner.spawn(draw_task(&TRIGGER).unwrap());
     spawner.spawn(push_task(&TRIGGER).unwrap());
 }
 
 #[embassy_executor::task]
-async fn push_task(sign: &'static Signal<CriticalSectionRawMutex, [Detection<SENSOR_COUNT>; HISTORY_DEPTH]>) -> ! {
-    let mut my_detections:DetectionHistory<{SENSOR_COUNT}, HISTORY_DEPTH> = DetectionHistory::new();
+async fn push_task(
+    sign: &'static Signal<CriticalSectionRawMutex, [Detection<SENSOR_COUNT>; HISTORY_DEPTH]>,
+) -> ! {
+    let mut my_detections: DetectionHistory<{ SENSOR_COUNT }, HISTORY_DEPTH> =
+        DetectionHistory::new();
     // my_detections.get_history_capacity()
     let max: usize = my_detections.get_history_capacity();
     let mut count = 0;
@@ -134,8 +132,5 @@ static EXECUTOR: StaticCell<Executor> = StaticCell::new();
 fn main() {
     let executor = EXECUTOR.init(Executor::new());
 
-    executor.run(|spawner|
-        {
-            spawner.spawn(main_task(spawner).unwrap())
-        })
+    executor.run(|spawner| spawner.spawn(main_task(spawner).unwrap()))
 }

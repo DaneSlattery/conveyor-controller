@@ -5,6 +5,10 @@
 //!  Direction - used to set the direction of rotation
 //!  Enable - used to enable or disable the motor
 
+use crate::stepper_motor::Direction::{Clockwise, CounterClockwise};
+use embassy_time::Timer;
+use embedded_hal::digital::ErrorType;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Clockwise,
@@ -183,8 +187,14 @@ pub struct StepperMotor<P, D> {
 impl<P, D> StepperMotor<P, D>
 where
     P: embedded_hal::digital::OutputPin,
-    D: embedded_hal::delay::DelayNs,
+    D: embedded_hal_async::delay::DelayNs,
 {
+    const STEP_PULSE_WIDTH_US: u64 = 625 / 2;
+
+    pub const fn step_delay(&self) -> u64 {
+        Self::STEP_PULSE_WIDTH_US
+    }
+
     pub const fn new(
         pulse_pin: P,
         direction_pin: P,
@@ -198,7 +208,7 @@ where
             enable_pin,
             steps_per_revolution,
             delay,
-            _direction: Direction::Clockwise,
+            _direction: Clockwise,
             _enabled: false,
         }
     }
@@ -224,62 +234,68 @@ where
         self._enabled
     }
 
-    pub fn swap_direction(&mut self) -> Result<(), P::Error> {
+    pub async fn swap_direction(&mut self) -> Result<(), P::Error> {
         self.set_direction(match self._direction {
-            Direction::Clockwise => Direction::CounterClockwise,
-            Direction::CounterClockwise => Direction::Clockwise,
+            Clockwise => CounterClockwise,
+            CounterClockwise => Clockwise,
         })
+        .await
     }
 
-    pub fn set_direction(&mut self, direction: Direction) -> Result<(), P::Error> {
+    pub fn steps_per_rev(&self) -> StepsPerRevolution {
+        self.steps_per_revolution
+    }
+
+    pub async fn set_direction(&mut self, direction: Direction) -> Result<(), P::Error> {
         if direction == self._direction {
             // already set
             return Ok(());
         }
         match direction {
             // todo: test these, but they are kind of wiring dependent
-            Direction::Clockwise => {
+            Clockwise => {
                 self.direction_pin.set_low()?;
             }
-            Direction::CounterClockwise => {
+            CounterClockwise => {
                 self.direction_pin.set_high()?;
             }
         }
         self._direction = direction;
+        Timer::after_micros(2).await;
 
-        //
         Ok(())
     }
 
-    pub fn step(&mut self) -> Result<(), ()> {
+    pub async fn step(&mut self) -> Result<(), P::Error> {
         // stepping when disabled does nothing
         if !self.is_enabled() {
             return Ok(());
         }
-        const STEP_DELAY_US: u32 = 20;
-        // todo: should we count steps/ direction?
-        // this hardware has a potentiometer embedded for position feedback,
-        // so this driver could take in a position encoder as a module, or the
-        // controller can be responsible for position feedback with background threads
-        // running stepper motor control, adc readings, pid, etc
-        self.pulse_pin.set_high().unwrap();
-        self.delay.delay_us(STEP_DELAY_US); // todo: this could be adjusted based on the steps per revolution to get an accurate "rpm"
-        self.pulse_pin.set_low().unwrap();
-        self.delay.delay_us(STEP_DELAY_US);
+
+        self.pulse_pin.set_high()?;
+        self.delay.delay_us(Self::STEP_PULSE_WIDTH_US as u32).await;
+        self.pulse_pin.set_low()?;
         Ok(())
     }
 }
 
-
+pub struct StepperController<P, D> {
+    stepper_motor: StepperMotor<P, D>,
+    angle_setpoint: f32,
+    angle_estimate: f32,
+    direction: Direction,
+    min_step_delay_us: u32,
+    max_step_delay_us: u32,
+    current_step_delay_us: u32,
+}
 
 #[cfg(test)]
-mod tests{
+mod tests {
     use super::*;
-    
+
     #[test]
-    pub fn test_switch_mapping_steps_per_rev()
-    { 
-        let switch_config = DipSwitches{
+    pub fn test_switch_mapping_steps_per_rev() {
+        let switch_config = DipSwitches {
             switch1: false,
             switch2: false,
             switch3: false,
@@ -289,7 +305,5 @@ mod tests{
             switch7: false,
             switch8: false,
         };
-        
-        
     }
 }

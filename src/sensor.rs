@@ -9,11 +9,11 @@
 
 use alloc::vec::Vec;
 // use alloc::vec::Vec;
+use crate::MEDIAN_FILTER_SIZE;
 use circular_buffer::{FixedCircularBuffer, Iter};
 
-
-
-
+// a type alias, since they're basically identical
+pub type EndStopSensor<P> = ConveyorSensor<P>;
 
 /// Represents a single conveyor belt sensor
 pub struct ConveyorSensor<P> {
@@ -71,21 +71,19 @@ pub fn score<const N: usize>(detections: &Detection<N>, array_side: &ArraySide) 
     }
 }
 
-pub type Detection<const NUM_SENSOR:usize> = [bool; NUM_SENSOR];
+pub type Detection<const NUM_SENSOR: usize> = [bool; NUM_SENSOR];
 
-#[derive(Default, Clone,Debug)]
-pub struct DetectionHistory<const NUM_SENSOR: usize,const NUM_HISTORY: usize>
-{
-    detections: FixedCircularBuffer<Detection<NUM_SENSOR>,NUM_HISTORY>,
+#[derive(Default, Clone, Debug)]
+pub struct DetectionHistory<const NUM_SENSOR: usize, const NUM_HISTORY: usize> {
+    detections: FixedCircularBuffer<Detection<NUM_SENSOR>, NUM_HISTORY>,
 }
 
-impl<const NUM_SENSOR:usize,const NUM_HISTORY:usize> DetectionHistory<NUM_SENSOR,NUM_HISTORY>
-{
+impl<const NUM_SENSOR: usize, const NUM_HISTORY: usize> DetectionHistory<NUM_SENSOR, NUM_HISTORY> {
     pub fn new() -> Self {
-        let mut this = Self{
-            detections: FixedCircularBuffer::default()
+        let mut this = Self {
+            detections: FixedCircularBuffer::default(),
         };
-        this.detections.fill([false;NUM_SENSOR]);
+        this.detections.fill([false; NUM_SENSOR]);
         this
     }
 
@@ -93,10 +91,10 @@ impl<const NUM_SENSOR:usize,const NUM_HISTORY:usize> DetectionHistory<NUM_SENSOR
         self.detections.push_back(detection);
     }
 
-    pub  fn get_num_sensors(&self) -> usize {
+    pub fn get_num_sensors(&self) -> usize {
         NUM_SENSOR
     }
-    pub  fn get_history_capacity(&self) -> usize {
+    pub fn get_history_capacity(&self) -> usize {
         NUM_HISTORY
     }
 
@@ -104,23 +102,29 @@ impl<const NUM_SENSOR:usize,const NUM_HISTORY:usize> DetectionHistory<NUM_SENSOR
         self.detections.len()
     }
 
-    pub fn detection_array(&self)-> [Detection<NUM_SENSOR>;NUM_HISTORY]
-    {
-        self.detections.iter().copied().collect::<Vec<Detection<NUM_SENSOR>>>().try_into().unwrap()
+    pub fn detection_array(&self) -> [Detection<NUM_SENSOR>; NUM_HISTORY] {
+        self.detections
+            .iter()
+            .copied()
+            .collect::<Vec<Detection<NUM_SENSOR>>>()
+            .try_into()
+            .unwrap()
         // self.detections.iter().map(|detection| *detection).collect::<Vec::<Detection<NUM_SENSOR>>>().try_into()
         //     .expect("Cannot convert to fixed size array")
     }
 
-    pub fn get_detections(&self) -> Iter<Detection<NUM_SENSOR>>
-    {
+    pub fn get_detections(&self) -> Iter<Detection<NUM_SENSOR>> {
         self.detections.iter()
     }
 }
 
-
-pub fn median_filter(score: i16,moving_median: &mut moving_median::MovingMedian<i16,5>)-> Option<i16>
-{
-    moving_median.add_value(score).expect("Value for moving median cannot be NaN");
+pub fn median_filter(
+    score: i16,
+    moving_median: &mut moving_median::MovingMedian<i16, { MEDIAN_FILTER_SIZE }>,
+) -> Option<i16> {
+    moving_median
+        .add_value(score)
+        .expect("Value for moving median cannot be NaN");
     moving_median.median()
 }
 
@@ -134,7 +138,7 @@ where
             array_side,
         }
     }
-    pub  fn get_num_sensors(&self) -> usize {
+    pub fn get_num_sensors(&self) -> usize {
         N
     }
 

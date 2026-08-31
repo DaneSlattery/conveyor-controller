@@ -1,21 +1,13 @@
-use blinksy::color::Srgb;
+use crate::sensor::Detection;
 use blinksy::layout::{Layout2d, Shape2d};
 use blinksy::markers::Dim2d;
 use blinksy::pattern::Pattern;
-use embassy_executor::Spawner;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
-use embassy_time::{Duration, Timer};
-use log::{logger, warn};
-// use esp_println::println;
-use crate::{PANEL_HEIGHT, PANEL_WIDTH};
-use crate::sensor::{Detection, DetectionHistory};
 
-pub struct GridParams<const NUM_SENSORS:usize, const NUM_HISTORY: usize> {
+pub struct GridParams<const NUM_SENSORS: usize, const NUM_HISTORY: usize> {
     detection_history: [Detection<NUM_SENSORS>; NUM_HISTORY],
 }
 
-impl<const NUM_SENSORS:usize, const NUM_HISTORY: usize> GridParams<NUM_SENSORS,NUM_HISTORY> {
+impl<const NUM_SENSORS: usize, const NUM_HISTORY: usize> GridParams<NUM_SENSORS, NUM_HISTORY> {
     pub fn new(detection: [Detection<NUM_SENSORS>; NUM_HISTORY]) -> Self {
         Self {
             detection_history: detection,
@@ -23,7 +15,9 @@ impl<const NUM_SENSORS:usize, const NUM_HISTORY: usize> GridParams<NUM_SENSORS,N
     }
 }
 
-impl<const NUM_SENSORS:usize, const NUM_HISTORY: usize> Default for GridParams<NUM_SENSORS,NUM_HISTORY> {
+impl<const NUM_SENSORS: usize, const NUM_HISTORY: usize> Default
+    for GridParams<NUM_SENSORS, NUM_HISTORY>
+{
     fn default() -> Self {
         Self {
             detection_history: [[false; NUM_SENSORS]; NUM_HISTORY],
@@ -31,30 +25,29 @@ impl<const NUM_SENSORS:usize, const NUM_HISTORY: usize> Default for GridParams<N
     }
 }
 
-pub struct DetectionGrid<const NUM_SENSORS:usize, const NUM_HISTORY: usize> {
+pub struct DetectionGrid<const NUM_SENSORS: usize, const NUM_HISTORY: usize> {
     params: GridParams<NUM_SENSORS, NUM_HISTORY>,
 }
 
-pub enum DetectionGridColors{
+pub enum DetectionGridColors {
     Detection,
     NoDetection,
     Border,
 }
 
-impl<Layout,const NUM_SENSORS:usize, const NUM_HISTORY: usize> Pattern<Dim2d, Layout> for DetectionGrid<NUM_SENSORS,NUM_HISTORY>
+impl<Layout, const NUM_SENSORS: usize, const NUM_HISTORY: usize> Pattern<Dim2d, Layout>
+    for DetectionGrid<NUM_SENSORS, NUM_HISTORY>
 where
     Layout: Layout2d,
 {
-    type Params = GridParams<NUM_SENSORS,NUM_HISTORY>;
+    type Params = GridParams<NUM_SENSORS, NUM_HISTORY>;
     type Color = blinksy::color::Srgb;
 
     fn new(params: Self::Params) -> Self {
         Self { params }
     }
 
-    fn tick(&self, _time_in_ms: u64) -> impl Iterator<Item=Self::Color> {
-
-
+    fn tick(&self, _time_in_ms: u64) -> impl Iterator<Item = Self::Color> {
         // let active = ((_time_in_ms / 250) as usize) % Layout::PIXEL_COUNT;
         //
         // return (0..Layout::PIXEL_COUNT).map(move |index| {
@@ -84,14 +77,8 @@ where
             width * height,
             "DetectionGrid currently supports exactly one grid shape"
         );
-        assert!(
-            NUM_SENSORS <= width,
-            "sensor count exceeds panel width"
-        );
-        assert!(
-            NUM_HISTORY <= height,
-            "history depth exceeds panel height"
-        );
+        assert!(NUM_SENSORS <= width, "sensor count exceeds panel width");
+        assert!(NUM_HISTORY <= height, "history depth exceeds panel height");
 
         let column_offset = (width - NUM_SENSORS) / 2;
         let row_offset = height - NUM_HISTORY;
@@ -120,17 +107,12 @@ where
                 _ => DetectionGridColors::Border,
             };
 
-
-
-            match detection_color{
-                DetectionGridColors::Detection =>Self::Color::new(1.0, 0.0, 0.0),
-                DetectionGridColors::NoDetection =>Self::Color::new(0.0, 1.0, 0.0),
+            match detection_color {
+                DetectionGridColors::Detection => Self::Color::new(1.0, 0.0, 0.0),
+                DetectionGridColors::NoDetection => Self::Color::new(0.0, 1.0, 0.0),
                 DetectionGridColors::Border => Self::Color::new(1.0, 0.0, 1.0),
             }
         })
-
-
-
     }
 
     fn set_params(&mut self, params: Self::Params) {
