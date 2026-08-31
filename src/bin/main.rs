@@ -9,32 +9,25 @@
 
 use blinksy::driver::ClocklessDriver;
 use blinksy::layout::Layout2d;
-use blinksy::layout::{Shape2d, Vec2};
 use blinksy::leds::Ws2812;
-use blinksy::patterns::noise::NoiseParams;
 use blinksy::{ControlBuilder, layout2d};
 use blinksy_esp::ClocklessRmtBuilder;
 use blinksy_esp::rmt::rmt_buffer_size;
-use blinksy_esp::time::elapsed;
 use conveyor_balancer::sensor::{
-    ArraySide, ConveyorSensor, ConveyorSensorArray, Detection, DetectionHistory, EndStopSensor,
+    ArraySide, ConveyorSensor, ConveyorSensorArray,  DetectionHistory, EndStopSensor,
     median_filter, score,
 };
-use conveyor_balancer::stepper_motor::{Direction, StepperMotor, StepsPerRevolution};
-use core::cmp::{Ordering, max};
+use conveyor_balancer::stepper_motor::StepperMotor;
+use core::cmp::Ordering;
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, Select, select};
-use embassy_time::{Duration, Ticker, Timer};
-// use embedded_hal::delay::DelayNs;
+use embassy_time::{Duration, Instant, Ticker, Timer};
 
-use embedded_hal_async::delay::DelayNs;
 
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{DriveMode, InputConfig, Level, Pull};
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::xtensa_lx::timer::delay;
 use esp_println::println;
 use log::{error, info, warn};
 use moving_median::MovingMedian;
@@ -45,23 +38,16 @@ extern crate alloc;
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-use conveyor_balancer::{
-    ANGLE_EPSILON, AppHistory, GEAR_RATIO, GRID, HISTORY_DEPTH, MAX_OUTPUT_ANGLE,
-    OUTPUT_ANGLE_PER_SENSOR, SENSOR_COUNT, STEPS_PER_DEGREE_INPUT, STEPS_PER_REVOLUTION,
-    SensorPayload,
-};
+use conveyor_balancer::{AppDetection, AppHistory, SensorPayload, GEAR_RATIO, GRID, HISTORY_DEPTH, MAX_OUTPUT_ANGLE, OUTPUT_ANGLE_PER_SENSOR, SENSOR_COUNT, STEPS_PER_DEGREE_INPUT, STEPS_PER_REVOLUTION, STEPS_PER_DEGREE_OUTPUT};
 
 use crate::SteeringControlMode::{Automatic, Homing, Jogging};
 use conveyor_balancer::display::{DetectionGrid, GridParams};
 use conveyor_balancer::stepper_motor::Direction::{Clockwise, CounterClockwise};
-use embassy_sync::signal::Signal;
 use embassy_sync::watch::{Receiver, Sender, Watch};
-use embassy_sync::{signal, watch};
-use embedded_hal::digital::OutputPin;
-use esp_hal::peripherals::GPIO;
+
 use esp_hal::rmt::Rmt;
 use esp_hal::time::Rate;
-use esp_rtos::start;
+use serde::Serialize;
 
 macro_rules! sensor_array    {
     ($config:expr,$side:expr,$($pin:expr),+$(,)?) => {
@@ -170,44 +156,40 @@ async fn main(spawner: Spawner) -> ! {
         STEPS_PER_REVOLUTION,
     );
 
-    // layout2d!(Layout, [GRID]);
+    layout2d!(Layout, [GRID]);
 
-    // let led_pin = peripherals.GPIO16;
-    // let freq = Rate::from_mhz(80);
-    //
-    // let rmt = Rmt::new(peripherals.RMT, freq).unwrap();
-    // let driver = ClocklessDriver::default()
-    //     .with_led::<Ws2812>()
-    //     .with_writer(
-    //     ClocklessRmtBuilder::default()
-    //         .with_led::<Ws2812>()
-    //         .with_rmt_buffer_size::<{rmt_buffer_size::<Ws2812>(Layout::PIXEL_COUNT)}>()
-    //         .with_channel(rmt.channel0)
-    //         .with_pin(led_pin)
-    //         .build(),
-    // );
-    //
-    // let mut control = ControlBuilder::new_2d()
-    //     .with_layout::<Layout, { Layout::PIXEL_COUNT }>()
-    //     // .with_pattern::<blinksy::patterns::noise::Noise2d<blinksy::patterns::noise::noise_fns::Perlin>>(NoiseParams::default())
-    //     .with_pattern::<DetectionGrid<SENSOR_COUNT, HISTORY_DEPTH>>(GridParams::default())
-    //     .with_driver(driver)
-    //     .with_frame_buffer_size::<{ Ws2812::frame_buffer_size(Layout::PIXEL_COUNT) }>()
-    //     .build();
+    let led_pin = peripherals.GPIO16;
+    let freq = Rate::from_mhz(80);
 
-    static SCORE_SIGNAL: Signal<CriticalSectionRawMutex, SensorPayload> = Signal::new();
-    static MOTION_CONTROL: Watch<CriticalSectionRawMutex, MotionCommand, 1> = Watch::new();
-    let motion_sender: Sender<CriticalSectionRawMutex, MotionCommand, 1> = MOTION_CONTROL.sender();
+    let rmt = Rmt::new(peripherals.RMT, freq).unwrap();
+    let driver = ClocklessDriver::default().with_led::<Ws2812>().with_writer(
+        ClocklessRmtBuilder::default()
+            .with_led::<Ws2812>()
+            .with_rmt_buffer_size::<{ rmt_buffer_size::<Ws2812>(Layout::PIXEL_COUNT) }>()
+            .with_channel(rmt.channel0)
+            .with_pin(led_pin)
+            .build(),
+    );
 
-    let motion_recv: Receiver<CriticalSectionRawMutex, MotionCommand, 1> =
+    let mut _control = ControlBuilder::new_2d()
+        .with_layout::<Layout, { Layout::PIXEL_COUNT }>()
+        // .with_pattern::<blinksy::patterns::noise::Noise2d<blinksy::patterns::noise::noise_fns::Perlin>>(NoiseParams::default())
+        .with_pattern::<DetectionGrid<SENSOR_COUNT, HISTORY_DEPTH>>(GridParams::default())
+        .with_driver(driver)
+        .with_frame_buffer_size::<{ Ws2812::frame_buffer_size(Layout::PIXEL_COUNT) }>()
+        .build();
+
+    static SCORE: Watch<CriticalSectionRawMutex, SensorPayload, 2> = Watch::new();
+    let score_sender: Sender<CriticalSectionRawMutex, SensorPayload, 2> = SCORE.sender();
+
+    let score_recv: Receiver<CriticalSectionRawMutex, SensorPayload, 2> = SCORE.receiver().unwrap();
+
+    static MOTION_CONTROL: Watch<CriticalSectionRawMutex, MotionCommand, 2> = Watch::new();
+    let motion_sender: Sender<CriticalSectionRawMutex, MotionCommand, 2> = MOTION_CONTROL.sender();
+
+    let motion_recv: Receiver<CriticalSectionRawMutex, MotionCommand, 2> =
         MOTION_CONTROL.receiver().unwrap();
-    static SCORE_WATCH: Watch<
-        CriticalSectionRawMutex,
-        [Detection<SENSOR_COUNT>; HISTORY_DEPTH],
-        1,
-    > = Watch::new();
-    let sender: Sender<CriticalSectionRawMutex, [Detection<SENSOR_COUNT>; HISTORY_DEPTH], 1> =
-        SCORE_WATCH.sender();
+
     // board has onboard led, will blink for some diagnostics
     let d2_led = esp_hal::gpio::Output::new(peripherals.GPIO2, Level::Low, output_config.clone());
 
@@ -218,16 +200,19 @@ async fn main(spawner: Spawner) -> ! {
             d2_led,
             center_sensor,
             aux_sensor,
-            &SCORE_SIGNAL,
-            sender,
+            score_sender,
         )
         .unwrap(),
     );
-    spawner.spawn(steering_control(&SCORE_SIGNAL, motion_sender).unwrap());
+    spawner.spawn(steering_control(score_recv, motion_sender).unwrap());
     spawner.spawn(run_stepper(stepper_driver, motion_recv).unwrap());
+
+    let score_recv: Receiver<CriticalSectionRawMutex, SensorPayload, 2> = SCORE.receiver().unwrap();
+    let motion_recv: Receiver<CriticalSectionRawMutex, MotionCommand, 2> =
+        MOTION_CONTROL.receiver().unwrap();
+    spawner.spawn(print_logs(score_recv, motion_recv).unwrap());
     // run stepper
     loop {
-
         Timer::after(Duration::from_millis(1)).await;
     }
 
@@ -240,16 +225,8 @@ async fn measure_array(
     mut d2_led: esp_hal::gpio::Output<'static>,
     mut center_sensor: EndStopSensor<esp_hal::gpio::Input<'static>>,
     mut aux_sensor: EndStopSensor<esp_hal::gpio::Input<'static>>,
-
-    signal: &'static Signal<CriticalSectionRawMutex, SensorPayload>,
-    mut sender: Sender<
-        'static,
-        CriticalSectionRawMutex,
-        [Detection<SENSOR_COUNT>; HISTORY_DEPTH],
-        1,
-    >,
+    signal: Sender<'static, CriticalSectionRawMutex, SensorPayload, 2>,
 ) {
-    // todo: transmit score to another thread
     println!("Starting array measurement loop");
 
     let mut detection_history: AppHistory = DetectionHistory::new();
@@ -263,22 +240,18 @@ async fn measure_array(
                 let center = center_sensor.triggered().unwrap();
                 let aux = aux_sensor.triggered().unwrap();
                 detection_history.push_detection(x);
-                sender.send(detection_history.detection_array());
                 let score = score(&x, conveyor_sensor_array.array_side());
 
                 let filtered_score = median_filter(score, &mut moving_median);
 
-                info!(
-                    "Detections: {:?}, Raw Score: {}, filtered score: {:?}",
-                    x, score, filtered_score
-                );
-                // println!("Detections: {:?}, Score: {}", x, score);
                 let payload = SensorPayload {
+                    raw_score: score,
                     score: filtered_score.expect("No filtered score"),
                     center,
+                    detections: x.clone(),
                     aux_input: aux,
                 };
-                signal.signal(payload);
+                signal.send(payload);
             }
             Err(x) => {
                 error!("{}", x);
@@ -293,16 +266,16 @@ async fn measure_array(
 #[derive(Debug)]
 enum SteeringControlMode {
     Homing { bounce: bool },
-    Automatic { steering_angle: f32 },
+    Automatic,
     Jogging,
 }
 
 #[embassy_executor::task]
 async fn steering_control(
-    signal: &'static Signal<CriticalSectionRawMutex, SensorPayload>,
-    sender: Sender<'static, CriticalSectionRawMutex, MotionCommand, 1>,
+    mut signal: Receiver<'static, CriticalSectionRawMutex, SensorPayload, 2>,
+    motion_sender: Sender<'static, CriticalSectionRawMutex, MotionCommand, 2>,
 ) {
-    let mut sensor_payload: SensorPayload = signal.wait().await;
+    let mut sensor_payload: SensorPayload = signal.changed().await;
     let mut bounce_off_trigger = false;
     if sensor_payload.center {
         // currently triggered, go counter clockwise until it's untriggered
@@ -315,22 +288,15 @@ async fn steering_control(
     // last sensor payload
 
     loop {
-        sensor_payload = signal.wait().await;
-        // if let Some(signal) = signal.try_take() {
-        //
-        //     sensor_payload = signal;
-        // }
+        sensor_payload = signal.changed().await;
+
         let command = match &state {
             Homing { bounce } => {
                 match (sensor_payload.center, bounce) {
                     (true, false) => {
                         // found the center
 
-                        // self._angle = 0.0;
-                        // break Ok(());
-                        state = Automatic {
-                            steering_angle: 0.0,
-                        };
+                        state = Automatic;
                         MotionCommand::ZeroController
                     }
                     (true, true) => {
@@ -349,7 +315,7 @@ async fn steering_control(
                     }
                 }
             }
-            Automatic { steering_angle: _ } => {
+            Automatic => {
                 if sensor_payload.aux_input {
                     state = Jogging;
                     continue;
@@ -364,26 +330,22 @@ async fn steering_control(
             }
             Jogging => {
                 if !sensor_payload.aux_input {
-                    state = Automatic {
-                        steering_angle: 0.0,
-                    };
+                    state = Automatic;
                     MotionCommand::Stop
                 } else {
                     MotionCommand::MoveAt { velocity: 1600 }
                 }
             }
         };
-        warn!("Motion command = {:?}, state = {:?}", command, state);
-        sender.send(command);
+        motion_sender.send(command);
     }
 }
 
 #[embassy_executor::task]
 async fn run_stepper(
     mut stepper_driver: StepperMotor<esp_hal::gpio::Output<'static>, embassy_time::Delay>,
-    mut recv: Receiver<'static, CriticalSectionRawMutex, MotionCommand, 1>,
+    mut recv: Receiver<'static, CriticalSectionRawMutex, MotionCommand, 2>,
 ) {
-    // todo: transmit score to another thread
     println!("Starting stepper control loop");
 
     println!("Arming Motor...");
@@ -391,7 +353,6 @@ async fn run_stepper(
     println!("Motor Armed");
 
     let mut position = 0;
-    let mut velocity = 0;
 
     let mut stepper_cmd = MotionCommand::Stop;
     'outer: loop {
@@ -424,7 +385,10 @@ async fn run_stepper(
                 let period = step_period_us;
 
                 stepper_driver.step().await.unwrap();
-                Timer::after(Duration::from_micros(period.saturating_sub(stepper_driver.step_delay()))).await;
+                Timer::after(Duration::from_micros(
+                    period.saturating_sub(stepper_driver.step_delay()),
+                ))
+                .await;
 
                 match setpoint.cmp(&position) {
                     Ordering::Less => position -= 1,
@@ -449,7 +413,10 @@ async fn run_stepper(
                 stepper_driver.set_direction(direction).await.unwrap();
 
                 stepper_driver.step().await.unwrap();
-                Timer::after(Duration::from_micros(step_period_us.saturating_sub(stepper_driver.step_delay()))).await;
+                Timer::after(Duration::from_micros(
+                    step_period_us.saturating_sub(stepper_driver.step_delay()),
+                ))
+                .await;
 
                 match direction {
                     Clockwise => position += 1,
@@ -458,27 +425,12 @@ async fn run_stepper(
             }
             MotionCommand::ZeroController => {
                 position = 0;
-                velocity = 0;
                 recv.changed().await;
             }
         }
     }
 }
 
-async fn wait_step_period_or_command(
-    receiver: &mut Receiver<'static, CriticalSectionRawMutex, MotionCommand, 1>,
-    period_us: u64,
-) -> bool {
-    match select(
-        Timer::after(Duration::from_micros(period_us as u64)),
-        receiver.changed(),
-    )
-    .await
-    {
-        Either::First(_) => false,
-        Either::Second(_) => true,
-    }
-}
 const fn score_to_roller_angle(score: i16) -> f32 {
     let roller_angle = OUTPUT_ANGLE_PER_SENSOR * score as f32;
     if score > 0 {
@@ -495,24 +447,104 @@ const fn roller_angle_to_stepper_angle(roller_angle: f32) -> f32 {
 }
 
 #[embassy_executor::task]
-async fn draw_task(signal: &'static Signal<CriticalSectionRawMutex, i16>, // control:
+async fn print_logs(
+    mut sensor_recv: Receiver<'static, CriticalSectionRawMutex, SensorPayload, 2>,
+    mut motion_recv: Receiver<'static, CriticalSectionRawMutex, MotionCommand, 2>,
 ) {
+    let mut seq = 0;
+    let mut timestamp_ms;
     loop {
+        let sensor_payload = sensor_recv.get().await;
+        let motion = motion_recv.get().await;
+        let detections = &sensor_payload.detections;
+        timestamp_ms = Instant::now().as_millis();
+        seq += 1;
+        let score_payload = ScorePayload{
+            raw: sensor_payload.raw_score,
+            filtered: sensor_payload.score,
+        }     ;
+        let motion_payload = match motion {
+            MotionCommand::Stop => MotionPayload {
+                mode: "automatic",
+                command: "stop",
+                target_steps: None,
+                target_output_deg: None,
+                velocity_sps: None,
+            },
+            MotionCommand::MoveTo { position } => MotionPayload {
+                mode: "automatic",
+                command: "move_to",
+                target_steps: Some(position),
+                target_output_deg: Some(position as f32 / STEPS_PER_DEGREE_OUTPUT),
+                velocity_sps: None,
+            },
+            MotionCommand::MoveAt { velocity } => MotionPayload {
+                mode: "homing", // or "jogging", based on SteeringControlMode
+                command: "move_at",
+                target_steps: None,
+                target_output_deg: None,
+                velocity_sps: Some(velocity),
+            },
+            MotionCommand::ZeroController => MotionPayload {
+                mode: "automatic",
+                command: "zero_controller",
+                target_steps: None,
+                target_output_deg: None,
+                velocity_sps: None,
+            },
+        };
+        let serial = SerialMessage{
+            msg_type: "conveyor.telemetry",
+
+            version:1,
+            seq,
+            timestamp_ms,
+            detections,
+            score:score_payload ,
+            motion: motion_payload
+        };
+        let log = serde_json::to_string(&serial).unwrap();
+        println!("{}", log);
+        // println!(
+        //     "{{\"type\": \"conveyor.telemetry\",\"version\":1,\"seq\":{seq}\"timestamp_ms\":{timestamp_ms},\"detections\":{detections:?},\"score\":{{\"raw\": {},\"filtered\": {} }},\"motion\": {{\"mode\":\"automatic\",\"command\":{:?}} }}",
+        //     sensor_payload.raw_score, sensor_payload.score, motion
+        // );
+        // println!("sensor: {:?}", sensor_recv.recv().await);
+        // println!("motion: {:?}", motion_recv.recv().await);
         Timer::after(Duration::from_millis(100)).await;
     }
 }
 
+#[derive(Debug,Serialize)]
+struct SerialMessage<'a>{
+    #[serde(rename="type")]
+  pub    msg_type: &'static str,
+    pub version: u32,
+    pub seq: u32,
+    pub timestamp_ms: u64,
+    pub detections: &'a AppDetection,
+    pub score: ScorePayload,
+    pub motion: MotionPayload,
+}
+#[derive(Debug,Serialize)]
+
+struct MotionPayload{
+    mode: &'static str,
+    command: &'static str,
+    target_steps: Option<i32>,
+    target_output_deg: Option<f32>,
+    velocity_sps: Option<i32>
+}
+#[derive(Debug,Serialize)]
+
+struct ScorePayload{
+    raw: i16,
+    filtered: i16,
+}
 #[derive(Clone, Debug)]
 enum MotionCommand {
     Stop,
     MoveTo { position: i32 },
     MoveAt { velocity: i32 },
     ZeroController,
-}
-
-enum StepperControl {
-    Left(i16),
-    Right(i16),
-    Jog,
-    Center,
 }

@@ -7,7 +7,6 @@
 
 use crate::stepper_motor::Direction::{Clockwise, CounterClockwise};
 use embassy_time::Timer;
-use embedded_hal::digital::ErrorType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -279,15 +278,15 @@ where
     }
 }
 
-pub struct StepperController<P, D> {
-    stepper_motor: StepperMotor<P, D>,
-    angle_setpoint: f32,
-    angle_estimate: f32,
-    direction: Direction,
-    min_step_delay_us: u32,
-    max_step_delay_us: u32,
-    current_step_delay_us: u32,
-}
+// pub struct StepperController<P, D> {
+//     stepper_motor: StepperMotor<P, D>,
+//     angle_setpoint: f32,
+//     angle_estimate: f32,
+//     direction: Direction,
+//     min_step_delay_us: u32,
+//     max_step_delay_us: u32,
+//     current_step_delay_us: u32,
+// }
 
 #[cfg(test)]
 mod tests {

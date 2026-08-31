@@ -7,9 +7,9 @@
 //! A software debounce per sensor, using a median filter
 //! or maximum rate of change filter
 
-use alloc::vec::Vec;
 // use alloc::vec::Vec;
 use crate::MEDIAN_FILTER_SIZE;
+use alloc::vec::Vec;
 use circular_buffer::{FixedCircularBuffer, Iter};
 
 // a type alias, since they're basically identical
@@ -73,6 +73,13 @@ pub fn score<const N: usize>(detections: &Detection<N>, array_side: &ArraySide) 
 
 pub type Detection<const NUM_SENSOR: usize> = [bool; NUM_SENSOR];
 
+// impl<const NUM_SENSOR:usize> Display for Detection<NUM_SENSOR>
+// {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+//         f.
+//     }
+// }
+
 #[derive(Default, Clone, Debug)]
 pub struct DetectionHistory<const NUM_SENSOR: usize, const NUM_HISTORY: usize> {
     detections: FixedCircularBuffer<Detection<NUM_SENSOR>, NUM_HISTORY>,
@@ -113,7 +120,7 @@ impl<const NUM_SENSOR: usize, const NUM_HISTORY: usize> DetectionHistory<NUM_SEN
         //     .expect("Cannot convert to fixed size array")
     }
 
-    pub fn get_detections(&self) -> Iter<Detection<NUM_SENSOR>> {
+    pub fn get_detections(&self) -> Iter<'_, Detection<NUM_SENSOR>> {
         self.detections.iter()
     }
 }
@@ -149,7 +156,7 @@ where
     pub fn sample(&mut self) -> Result<Detection<N>, P::Error> {
         let mut detections: [bool; N] = [false; N];
 
-        for (d, mut s) in detections.iter_mut().zip(&mut self.sensors) {
+        for (d, s) in detections.iter_mut().zip(&mut self.sensors) {
             *d = s.triggered()?;
         }
         Ok(detections)

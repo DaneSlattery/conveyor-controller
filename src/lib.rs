@@ -75,8 +75,11 @@ pub const GRID: Shape2d = Shape2d::Grid {
     serpentine: true,
 };
 
+#[derive(Debug, Clone)]
 pub struct SensorPayload {
+    pub raw_score: i16,
     pub score: i16,
     pub center: bool,
+    pub detections: AppDetection,
     pub aux_input: bool,
 }
