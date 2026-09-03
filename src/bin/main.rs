@@ -14,14 +14,13 @@ use blinksy::{ControlBuilder, layout2d};
 use blinksy_esp::ClocklessRmtBuilder;
 use blinksy_esp::rmt::rmt_buffer_size;
 use conveyor_balancer::sensor::{
-    ArraySide, ConveyorSensor, ConveyorSensorArray,  DetectionHistory, EndStopSensor,
-    median_filter, score,
+    ArraySide, ConveyorSensor, ConveyorSensorArray, DetectionHistory, EndStopSensor, median_filter,
+    score,
 };
 use conveyor_balancer::stepper_motor::StepperMotor;
 use core::cmp::Ordering;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Ticker, Timer};
-
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_backtrace as _;
@@ -38,13 +37,18 @@ extern crate alloc;
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-use conveyor_balancer::{AppDetection, AppHistory, SensorPayload, GEAR_RATIO, GRID, HISTORY_DEPTH, MAX_OUTPUT_ANGLE, OUTPUT_ANGLE_PER_SENSOR, SENSOR_COUNT, STEPS_PER_DEGREE_INPUT, STEPS_PER_REVOLUTION, STEPS_PER_DEGREE_OUTPUT};
+use conveyor_balancer::{
+    AppDetection, AppHistory, GEAR_RATIO, GRID, HISTORY_DEPTH, MAX_OUTPUT_ANGLE,
+    OUTPUT_ANGLE_PER_SENSOR, SENSOR_COUNT, STEPS_PER_DEGREE_INPUT, STEPS_PER_DEGREE_OUTPUT,
+    STEPS_PER_REVOLUTION, SensorPayload,
+};
 
 use crate::SteeringControlMode::{Automatic, Homing, Jogging};
 use conveyor_balancer::display::{DetectionGrid, GridParams};
 use conveyor_balancer::stepper_motor::Direction::{Clockwise, CounterClockwise};
 use embassy_sync::watch::{Receiver, Sender, Watch};
 
+use conveyor_balancer::controller::{PidController, PidMode};
 use esp_hal::rmt::Rmt;
 use esp_hal::time::Rate;
 use serde::Serialize;
@@ -116,7 +120,7 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
     info!("Embassy initialized!");
-    let input_config = InputConfig::default().with_pull(Pull::Up);
+    let input_config = InputConfig::default(); //.with_pull(Pull::Up);
 
     let sensor_array = sensor_array!(
         input_config,
@@ -287,6 +291,13 @@ async fn steering_control(
 
     // last sensor payload
 
+    let mut pid = PidController::new(1.0, 0.01, 0.0)
+        .with_setpoint(0.0)
+        .with_out_min(-MAX_OUTPUT_ANGLE)
+        .with_out_max(MAX_OUTPUT_ANGLE);
+
+    // pid.set_sample_time()
+
     loop {
         sensor_payload = signal.changed().await;
 
@@ -301,7 +312,7 @@ async fn steering_control(
                     }
                     (true, true) => {
                         // currently bouncing, keep going
-                        MotionCommand::MoveAt { velocity: -1 }
+                        MotionCommand::MoveAt { velocity: -800 }
                     }
                     (false, true) => {
                         // we were bouncing, now the middle is out, so reverse
@@ -311,18 +322,25 @@ async fn steering_control(
                     (false, false) => {
                         // not in the middle, and not bouncing,
                         // neither triggered, keep going
-                        MotionCommand::MoveAt { velocity: 1 }
+                        MotionCommand::MoveAt { velocity: 800 }
                     }
                 }
             }
             Automatic => {
                 if sensor_payload.aux_input {
                     state = Jogging;
+                    // pid.set_mode(PidMode::Manual);
                     continue;
                 }
                 let score = sensor_payload.score;
-                let roller_angle = score_to_roller_angle(score);
-                let stepper_angle = roller_angle_to_stepper_angle(roller_angle);
+                // input is the score
+                pid.set_input(score as f32);
+                pid.compute();
+                let output = pid.get_output();
+
+                // output is driving the target roller angle
+                // let roller_angle = score_to_roller_angle(output);
+                let stepper_angle = roller_angle_to_stepper_angle(output);
                 let step_target = stepper_angle_to_steps(stepper_angle);
                 MotionCommand::MoveTo {
                     position: step_target,
@@ -331,9 +349,11 @@ async fn steering_control(
             Jogging => {
                 if !sensor_payload.aux_input {
                     state = Automatic;
-                    MotionCommand::Stop
+                    // pid.set_mode(PidMode::Auto);
+
+                    MotionCommand::ZeroController
                 } else {
-                    MotionCommand::MoveAt { velocity: 1600 }
+                    MotionCommand::MoveAt { velocity: 3200 }
                 }
             }
         };
@@ -363,9 +383,12 @@ async fn run_stepper(
         match stepper_cmd {
             MotionCommand::Stop => {
                 // do nothing, position hold.
+                stepper_driver.disable_driver().unwrap();
                 recv.changed().await;
             }
             MotionCommand::MoveTo { position: setpoint } => {
+                stepper_driver.enable_driver().unwrap();
+
                 let error = setpoint - position;
                 if error == 0 {
                     stepper_cmd = recv.changed().await;
@@ -380,7 +403,7 @@ async fn run_stepper(
 
                 stepper_driver.set_direction(direction).await.unwrap();
 
-                const MAX_SPEED_SPS: u32 = 1600;
+                const MAX_SPEED_SPS: u32 = 3200;
                 let step_period_us = 1_000_000u64 / MAX_SPEED_SPS as u64;
                 let period = step_period_us;
 
@@ -397,6 +420,8 @@ async fn run_stepper(
                 }
             }
             MotionCommand::MoveAt { velocity } => {
+                stepper_driver.enable_driver().unwrap();
+
                 if velocity == 0 {
                     stepper_cmd = MotionCommand::Stop;
                     continue 'outer;
@@ -424,6 +449,8 @@ async fn run_stepper(
                 }
             }
             MotionCommand::ZeroController => {
+                stepper_driver.disable_driver().unwrap();
+
                 position = 0;
                 recv.changed().await;
             }
@@ -431,14 +458,14 @@ async fn run_stepper(
     }
 }
 
-const fn score_to_roller_angle(score: i16) -> f32 {
-    let roller_angle = OUTPUT_ANGLE_PER_SENSOR * score as f32;
-    if score > 0 {
-        roller_angle.min(MAX_OUTPUT_ANGLE)
-    } else {
-        roller_angle.max(-MAX_OUTPUT_ANGLE)
-    }
-}
+// const fn score_to_roller_angle(score: f32) -> f32 {
+//     let roller_angle = OUTPUT_ANGLE_PER_SENSOR * score as f32;
+//     if score > 0 {
+//         roller_angle.min(MAX_OUTPUT_ANGLE)
+//     } else {
+//         roller_angle.max(-MAX_OUTPUT_ANGLE)
+//     }
+// }
 const fn stepper_angle_to_steps(stepper_angle: f32) -> i32 {
     (stepper_angle * STEPS_PER_DEGREE_INPUT) as i32
 }
@@ -459,10 +486,10 @@ async fn print_logs(
         let detections = &sensor_payload.detections;
         timestamp_ms = Instant::now().as_millis();
         seq += 1;
-        let score_payload = ScorePayload{
+        let score_payload = ScorePayload {
             raw: sensor_payload.raw_score,
             filtered: sensor_payload.score,
-        }     ;
+        };
         let motion_payload = match motion {
             MotionCommand::Stop => MotionPayload {
                 mode: "automatic",
@@ -493,15 +520,15 @@ async fn print_logs(
                 velocity_sps: None,
             },
         };
-        let serial = SerialMessage{
+        let serial = SerialMessage {
             msg_type: "conveyor.telemetry",
 
-            version:1,
+            version: 1,
             seq,
             timestamp_ms,
             detections,
-            score:score_payload ,
-            motion: motion_payload
+            score: score_payload,
+            motion: motion_payload,
         };
         let log = serde_json::to_string(&serial).unwrap();
         println!("{}", log);
@@ -515,10 +542,10 @@ async fn print_logs(
     }
 }
 
-#[derive(Debug,Serialize)]
-struct SerialMessage<'a>{
-    #[serde(rename="type")]
-  pub    msg_type: &'static str,
+#[derive(Debug, Serialize)]
+struct SerialMessage<'a> {
+    #[serde(rename = "type")]
+    pub msg_type: &'static str,
     pub version: u32,
     pub seq: u32,
     pub timestamp_ms: u64,
@@ -526,18 +553,18 @@ struct SerialMessage<'a>{
     pub score: ScorePayload,
     pub motion: MotionPayload,
 }
-#[derive(Debug,Serialize)]
+#[derive(Debug, Serialize)]
 
-struct MotionPayload{
+struct MotionPayload {
     mode: &'static str,
     command: &'static str,
     target_steps: Option<i32>,
     target_output_deg: Option<f32>,
-    velocity_sps: Option<i32>
+    velocity_sps: Option<i32>,
 }
-#[derive(Debug,Serialize)]
+#[derive(Debug, Serialize)]
 
-struct ScorePayload{
+struct ScorePayload {
     raw: i16,
     filtered: i16,
 }

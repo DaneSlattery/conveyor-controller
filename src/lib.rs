@@ -33,7 +33,7 @@ pub const STEPS_PER_REVOLUTION: StepsPerRevolution = StepsPerRevolution::Steps16
 pub const GEAR_RATIO: u16 = 100;
 
 /// Maximum angle of the output shaft in degrees
-pub const MAX_OUTPUT_ANGLE: f32 = 6.;
+pub const MAX_OUTPUT_ANGLE: f32 = 7.;
 
 /// Number of steps to move the input shaft by 1 degree
 pub const STEPS_PER_DEGREE_INPUT: f32 = STEPS_PER_REVOLUTION.steps_per_revolution() as f32 / 360.0;
@@ -47,7 +47,7 @@ pub const OUTPUT_ANGLE_PER_SENSOR: f32 = MAX_OUTPUT_ANGLE / (SENSOR_COUNT / 2) a
 /// Minimum error for angles
 pub const ANGLE_EPSILON: f32 = 0.1;
 
-pub const MEDIAN_FILTER_SIZE: usize = 20;
+pub const MEDIAN_FILTER_SIZE: usize = 10;
 pub const PANEL_WIDTH: usize = 16;
 pub const PANEL_HEIGHT: usize = 16;
 pub const PANEL_PIXELS: usize = PANEL_WIDTH * PANEL_HEIGHT;

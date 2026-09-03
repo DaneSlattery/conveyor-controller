@@ -47,8 +47,8 @@
     return {
       type: 'line' as const,
       data: { datasets: [
-        { label: 'Raw score', data: [] as ChartPoint[], borderColor: '#2563eb', backgroundColor: '#2563eb', pointRadius: 0, borderWidth: 2 },
-        { label: 'Filtered score', data: [] as ChartPoint[], borderColor: '#ca8a04', backgroundColor: '#ca8a04', pointRadius: 0, borderWidth: 2 },
+        { label: 'Raw score', data: [] as ChartPoint[], borderColor: '#137bb6', backgroundColor: '#137bb6', pointRadius: 0, borderWidth: 2 },
+        { label: 'Filtered score', data: [] as ChartPoint[], borderColor: '#e38b22', backgroundColor: '#e38b22', pointRadius: 0, borderWidth: 2 },
       ] },
       options: { ...base, scales: { ...base.scales, y: { min: -5, max: 5, title: { display: true, text: 'Score' } } } },
     };
@@ -59,8 +59,8 @@
     return {
       type: 'line' as const,
       data: { datasets: [
-        { label: 'Target output angle', data: [] as ChartPoint[], yAxisID: 'angle', borderColor: '#7c3aed', backgroundColor: '#7c3aed', pointRadius: 0, borderWidth: 2, spanGaps: false },
-        { label: 'Commanded speed', data: [] as ChartPoint[], yAxisID: 'speed', borderColor: '#0f766e', backgroundColor: '#0f766e', pointRadius: 0, borderWidth: 2, spanGaps: false },
+        { label: 'Target output angle', data: [] as ChartPoint[], yAxisID: 'angle', borderColor: '#df5d31', backgroundColor: '#df5d31', pointRadius: 0, borderWidth: 2, spanGaps: false },
+        { label: 'Commanded speed', data: [] as ChartPoint[], yAxisID: 'speed', borderColor: '#367c53', backgroundColor: '#367c53', pointRadius: 0, borderWidth: 2, spanGaps: false },
       ] },
       options: { ...base, scales: { ...base.scales, angle: { type: 'linear' as const, position: 'left' as const, min: -6, max: 6, title: { display: true, text: 'Output angle (°)' } }, speed: { type: 'linear' as const, position: 'right' as const, title: { display: true, text: 'Speed (steps/s)' }, grid: { drawOnChartArea: false } } } },
     };

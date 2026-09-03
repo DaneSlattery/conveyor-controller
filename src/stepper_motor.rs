@@ -218,14 +218,18 @@ where
         // so this might be inverted.
         // when the pin is HIGH, driver enabled,
         // when the pin is LOW, driver disabled
-        self.enable_pin.set_high()?;
-        self._enabled = true;
+        if !self._enabled {
+            self.enable_pin.set_high()?;
+            self._enabled = true;
+        }
         Ok(())
     }
 
     pub fn disable_driver(&mut self) -> Result<(), P::Error> {
-        self.enable_pin.set_low()?;
-        self._enabled = false;
+        if self._enabled {
+            self.enable_pin.set_low()?;
+            self._enabled = false;
+        }
         Ok(())
     }
 

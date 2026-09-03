@@ -65,20 +65,28 @@
 <svelte:head><meta name="description" content="Real-time conveyor sensor telemetry dashboard" /></svelte:head>
 
 <main>
-  <header class="masthead">
-    <div>
-      <p class="eyebrow">CONVEYOR CONTROLLER / DIAGNOSTICS</p>
-      <h1>Live telemetry</h1>
-      <p class="subtitle">Sensor alignment and output-shaft instructions over time.</p>
-    </div>
-    <SerialConnection {baudRate} {connected} status={status} detail={statusDetail} onBaudRateChange={(value) => baudRate = value} onConnect={connect} onDisconnect={disconnect} />
+  <header class="application-bar">
+    <div class="brand"><span class="brand-mark">▰</span><span>Conveyor alignment controller</span><small>embedded telemetry</small></div>
+    <div class="run-controls"><span class:active={connected} class="run-indicator"></span><span>{connected ? 'RUNNING' : 'STOPPED'}</span></div>
   </header>
 
-  <MetricCards record={latest} />
-  <section class="dashboard">
-    <SensorGrid {rows} />
-    <TelemetryChart {history} kind="score" />
-    <TelemetryChart {history} kind="motion" />
+  <section class="toolstrip" aria-label="Connection controls">
+    <span class="tool-label">LIVE DEVICE LINK</span>
+    <SerialConnection {baudRate} {connected} status={status} detail={statusDetail} onBaudRateChange={(value) => baudRate = value} onConnect={connect} onDisconnect={disconnect} />
   </section>
-  <footer><span>{history.length.toLocaleString()} records retained <small>MAX 7,200</small></span><span>{malformedLines} non-telemetry line{malformedLines === 1 ? '' : 's'} ignored</span></footer>
+
+  <section class="model-title">
+    <div><span class="crumb">CONVEYOR CONTROL / ALIGNMENT LOOP</span><h1>Controller monitor</h1></div>
+    <p>Measurement → filter → stepper command</p>
+  </section>
+
+  <section class="model-canvas" aria-label="Conveyor controller telemetry">
+    <MetricCards record={latest} {history} />
+    <section class="dashboard">
+      <SensorGrid {rows} record={latest} />
+      <TelemetryChart {history} kind="score" />
+      <TelemetryChart {history} kind="motion" />
+    </section>
+  </section>
+  <footer><span>{history.length.toLocaleString()} samples in workspace <small>BUFFER 7,200</small></span><span>{malformedLines} non-telemetry line{malformedLines === 1 ? '' : 's'} ignored</span></footer>
 </main>
