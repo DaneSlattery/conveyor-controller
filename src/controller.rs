@@ -37,7 +37,7 @@ impl PidController {
             input: 0.0,
             output: 0.0,
             last_time: Instant::from_millis(0),
-            sample_time: Duration::from_millis(200),
+            sample_time: Duration::from_millis(500),
             pid_mode: PidMode::Auto
         }
     }
@@ -92,7 +92,7 @@ impl PidController {
     }
 
     pub fn set_tunings(&mut self, kp: f32, ki: f32, kd: f32) {
-        let sample_time_sec: f32 = self.sample_time.as_secs() as f32;
+        let sample_time_sec: f32 = self.sample_time.as_micros() as f32/1_000_000.0;
         self.kp = kp;
         self.ki = ki * sample_time_sec;
         self.kd = kd / sample_time_sec;
@@ -102,7 +102,7 @@ impl PidController {
         if time.le(&Duration::from_secs(0)) {
             return;
         }
-        let ratio = (time.as_millis() / self.sample_time.as_millis()) as f32;
+        let ratio = (time.as_micros() / self.sample_time.as_micros()) as f32;
         self.ki *= ratio;
         self.kd /= ratio;
         self.sample_time = time;
